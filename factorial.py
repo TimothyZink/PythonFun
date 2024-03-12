@@ -1,7 +1,7 @@
 from enum import Enum
 Strategy = Enum("Strategy", ["Recursion", "Loop", "DivideAndConquer", "DivideAndConquerThreaded"])
-import asyncio
-from threading import Thread
+import concurrent.futures
+import time
 
 def __FactorialRecursion(n: int) -> int:
 	if n == 0:
@@ -14,7 +14,7 @@ def __FactorialLoop(n: int) -> int:
 		result *= i
 	return result
 
-async def __FactorialDivideAndConquer_Awaitable(start: int, end: int):
+def __FactorialDivideAndConquerThreaded(start: int, end: int) -> int:
 	if end < start:
 		raise ValueError("end must be greater than or equal to start")
 	if start == end:
@@ -22,21 +22,10 @@ async def __FactorialDivideAndConquer_Awaitable(start: int, end: int):
 	if start + 1 == end:
 		return start * end
 	else:
-		loop1 = asyncio.new_event_loop()
-		Thread(target=loop1.run_forever, daemon=True).start()
-		loop2 = asyncio.new_event_loop()
-		Thread(target=loop2.run_forever, daemon=True).start()
-		future1 = asyncio.run_coroutine_threadsafe(__FactorialDivideAndConquer_Awaitable(start, (start + end) // 2), loop1)
-		future2 = asyncio.run_coroutine_threadsafe(__FactorialDivideAndConquer_Awaitable((start + end) // 2 + 1, end), loop2)
-		r = future1.result() * future2.result()
-		loop1.stop()
-		loop2.stop()
-		return r
-	
-		# task1: asyncio.Task[int] = asyncio.create_task(__FactorialDivideAndConquer_Awaitable(start, (start + end) // 2))
-		# task2: asyncio.Task[int] = asyncio.create_task(__FactorialDivideAndConquer_Awaitable((start + end) // 2 + 1, end))
-		# t = await asyncio.gather(task1, task2)
-		# return t[0] * t[1]
+		with concurrent.futures.ThreadPoolExecutor() as executor:
+			future1 = executor.submit(__FactorialDivideAndConquerThreaded, start, (start + end) // 2)
+			future2 = executor.submit(__FactorialDivideAndConquerThreaded, (start + end) // 2 + 1, end)
+		return future1.result() * future2.result()
 def __FactorialDivideAndConquer(start: int, end: int) -> int:
 	if end < start:
 		raise ValueError("end must be greater than or equal to start")
@@ -55,14 +44,15 @@ def Factorial(n: int, strategy: Strategy = Strategy.Loop) -> int:
 	elif strategy == Strategy.DivideAndConquer:
 		return __FactorialDivideAndConquer(1, n)
 	elif strategy == Strategy.DivideAndConquerThreaded:
-		return asyncio.run(__FactorialDivideAndConquer_Awaitable(1, n))
+		return __FactorialDivideAndConquerThreaded(1, n)
 	
 def _runTest(n: int) -> None:
-	import time
 	allMatch = True
 	expect = 0
 	times = []
-	for s in Strategy:
+	# toTest = Strategy
+	toTest = [Strategy.Loop, Strategy.Recursion, Strategy.DivideAndConquer]
+	for s in toTest:
 		start = time.time()
 		r = Factorial(n, s)
 		times.append(time.time() - start)
@@ -70,9 +60,9 @@ def _runTest(n: int) -> None:
 			expect = r
 		elif expect != r:
 			allMatch = False
-		print(f"Factorial({n}, {s}) = {r}")
+		print(f"Factorial({n}, {s}) = {str(r)[:100]}...")
 	print(f"Results match: {allMatch}")
-	for i, s in enumerate(Strategy):
+	for i, s in enumerate(toTest):
 		print(f"Time for {s}: {times[i]}")
 if __name__ == "__main__":
 	def Help():
@@ -83,17 +73,19 @@ if __name__ == "__main__":
 		print("  -t: use threaded divide and conquer")
 		print("  -o: override recursion limit")
 		print("  -n: override max str digits")
+		print("  -D: show duration")
 		print("  -T: run tests")
 	import sys
 	if len(sys.argv) < 2:
-		# Help()
-		sys.set_int_max_str_digits(10 ** 9)
-		sys.setrecursionlimit(10 ** 9)
-		_runTest(1000)
+		Help()
+		# sys.set_int_max_str_digits(10 ** 9)
+		# sys.setrecursionlimit(10 ** 9)
+		# _runTest(1000)
 		sys.exit(1)
 	# defaults
 	strategy: Strategy = Strategy.Loop
 	runTests = False
+	timeCalc = False
 	for arg in sys.argv[1:-1]:
 		if arg == "-d":
 			strategy = Strategy.DivideAndConquer
@@ -101,21 +93,28 @@ if __name__ == "__main__":
 			strategy = Strategy.Recursion
 		elif arg == "-t":
 			strategy = Strategy.DivideAndConquerThreaded
+			print("Using threaded divide and conquer is not recommended")
 		elif arg == "-o":
 			sys.setrecursionlimit(10 ** 9)
 		elif arg == "-T":
 			runTests = True
 		elif arg == "-n":
 			sys.set_int_max_str_digits(10 ** 9)
+		elif arg == "-D":
+			timeCalc = True
 		else:
 			print(f"Unknown option: {arg}")
 			exit(1)
 	try:
-
 		if runTests:
 			_runTest(int(sys.argv[-1]))
 		else:
-			print(Factorial(int(sys.argv[-1]), strategy))
+			if timeCalc:
+				start = time.time()
+				r = Factorial(int(sys.argv[-1]), strategy)
+				print(f"Duration: {time.time() - start}")
+			else:
+				print(Factorial(int(sys.argv[-1]), strategy))
 	except ValueError as e:
 		print(e)
 		Help()
